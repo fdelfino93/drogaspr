@@ -97,6 +97,25 @@ fig_state = px.bar(
 st.plotly_chart(fig_state, use_container_width=True)
 
 # ------------------------------
+# PARTICIPAÇÃO POR MUNICÍPIO (pizza - meses selecionados)
+# ------------------------------
+st.subheader(f"🍕 Participação por município - {droga} (meses selecionados)")
+df_pizza = df_filtrado.copy()
+df_pizza["TotalSelecionado"] = df_pizza[meses_selecionados].sum(axis=1)
+
+# (opcional) remove municípios zerados para evitar fatias nulas
+df_pizza = df_pizza[df_pizza["TotalSelecionado"] > 0]
+
+fig_pizza = px.pie(
+    df_pizza,
+    names="Municipio",
+    values="TotalSelecionado",
+    title=f"Distribuição das apreensões por município - {droga}",
+    hole=0.3  # donut; troque para 0 se quiser pizza tradicional
+)
+st.plotly_chart(fig_pizza, use_container_width=True)
+
+# ------------------------------
 # EXPORTAR
 # ------------------------------
 st.subheader("💾 Exportar dados")
