@@ -194,6 +194,7 @@ else:
         locations="Municipio_ascii",
         featureidkey="properties.name_ascii",
         color="TotalSelecionado",
+        color_continuous_scale="Plasma",  # Aqui você muda a escala de cores
         projection="mercator",
         labels={"TotalSelecionado": "Kg"},
         title=f"Mapa de apreensões – {droga} (meses selecionados)"
