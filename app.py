@@ -2,6 +2,9 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
+import requests
+from unidecode import unidecode
 
 st.set_page_config(page_title="Apreensão de Drogas no Paraná", layout="wide")
 
@@ -121,3 +124,89 @@ st.plotly_chart(fig_pizza, use_container_width=True)
 st.subheader("💾 Exportar dados")
 csv = df_tabela.to_csv(index=False).encode("utf-8")
 st.download_button(f"Baixar CSV filtrado ({droga})", csv, f"apreensao_{droga.lower()}_filtrada.csv", "text/csv")
+
+# ------------------------------
+# 🗺️ MAPA: Apreensões por município (meses selecionados) + contorno do PR
+# ------------------------------
+
+st.subheader(f"🗺️ Mapa de apreensões por município - {droga}")
+
+@st.cache_data
+def carregar_geojson_municipios_pr():
+    # GeoJSON dos municípios do PR (UF 41)
+    url = "https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-41-mun.json"
+    gj = requests.get(url, timeout=30).json()
+    # Normaliza nomes para casar com o CSV
+    for f in gj["features"]:
+        f["properties"]["name_ascii"] = unidecode(f["properties"]["name"]).upper()
+    return gj
+
+@st.cache_data
+def carregar_geojson_contorno_pr():
+    # GeoJSON do perímetro do estado do PR (uma feature)
+    url = "https://raw.githubusercontent.com/giuliano-macedo/geodata-br-states/main/geojson/br_states/br_pr.json"
+    return requests.get(url, timeout=30).json()
+
+def adicionar_contorno_uf(fig, uf_geojson, cor="black", largura=2.5):
+    """Desenha o contorno da UF por cima do mapa (Polygon/MultiPolygon)."""
+    geom = uf_geojson["features"][0]["geometry"]
+    coords = geom["coordinates"]
+    multipoligonos = coords if geom["type"] == "MultiPolygon" else [coords]
+
+    for poligono in multipoligonos:   # poligono = [anel_externo, aneis_internos...]
+        for anel in poligono:         # anel = lista de [lon, lat]
+            lons, lats = zip(*anel)
+            fig.add_trace(go.Scattergeo(
+                lon=lons, lat=lats,
+                mode="lines",
+                line=dict(color=cor, width=largura),
+                hoverinfo="skip",
+                showlegend=False
+            ))
+    return fig
+
+# --- Dados e pré-processamento
+geojson_mun = carregar_geojson_municipios_pr()
+geojson_uf = carregar_geojson_contorno_pr()
+
+df_mapa = df_filtrado.copy()
+df_mapa["TotalSelecionado"] = df_mapa[meses_selecionados].sum(axis=1)
+df_mapa["Municipio_ascii"] = df_mapa["Municipio"].map(lambda s: unidecode(str(s)).upper())
+
+# Remove municípios com zero (opcional: deixa o mapa mais limpo)
+df_mapa = df_mapa[df_mapa["TotalSelecionado"] > 0]
+
+# --- Controle de tamanho pela sidebar
+tamanho_mapa = st.sidebar.select_slider(
+    "Tamanho do mapa",
+    options=["Pequeno", "Médio", "Grande", "Tela cheia"],
+    value="Grande"
+)
+alturas = {"Pequeno": 450, "Médio": 600, "Grande": 800, "Tela cheia": 950}
+
+if df_mapa.empty:
+    st.info("Sem dados para os filtros atuais (municípios/meses). Ajuste os filtros para visualizar o mapa.")
+else:
+    # --- Choropleth por município
+    fig_map = px.choropleth(
+        df_mapa,
+        geojson=geojson_mun,
+        locations="Municipio_ascii",
+        featureidkey="properties.name_ascii",
+        color="TotalSelecionado",
+        projection="mercator",
+        labels={"TotalSelecionado": "Kg"},
+        title=f"Mapa de apreensões – {droga} (meses selecionados)"
+    )
+
+    # --- Contorno da UF
+    fig_map = adicionar_contorno_uf(fig_map, geojson_uf, cor="black", largura=2.5)
+
+    # --- Enquadramento e layout (área maior + margens pequenas)
+    fig_map.update_geos(fitbounds="locations", visible=False)
+    fig_map.update_layout(
+        height=alturas[tamanho_mapa],
+        margin=dict(l=0, r=0, t=60, b=0)
+    )
+
+    st.plotly_chart(fig_map, use_container_width=True)
