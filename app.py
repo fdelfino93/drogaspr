@@ -6,9 +6,9 @@ import plotly.graph_objects as go
 import requests
 from unidecode import unidecode
 
-st.set_page_config(page_title="Apreensão de Drogas no Paraná", layout="wide")
+st.set_page_config(page_title="Apreensão de Drogas no Paraná - 2024", layout="wide")
 
-st.title("🚔 Apreensões de Drogas no Paraná (por município)")
+st.title("🚔 Apreensões de Drogas no Paraná - 2024")
 
 # ------------------------------
 # Função para carregar dados
@@ -194,6 +194,7 @@ else:
         locations="Municipio_ascii",
         featureidkey="properties.name_ascii",
         color="TotalSelecionado",
+        color_continuous_scale="Plasma",  # Aqui você muda a escala de cores
         projection="mercator",
         labels={"TotalSelecionado": "Kg"},
         title=f"Mapa de apreensões – {droga} (meses selecionados)"
