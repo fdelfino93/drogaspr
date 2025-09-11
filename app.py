@@ -11,21 +11,32 @@ st.set_page_config(page_title="Apreensão de Drogas no Paraná - 2024", layout="
 st.title("🚔 Apreensões de Drogas no Paraná - 2024")
 
 # ------------------------------
+# Constantes
+# ------------------------------
+DATA_FILES = {
+    "Maconha": "MaconhaV2.csv",
+    "Cocaína": "CocainaV2.csv",
+    "Crack": "CrackV2.csv",
+}
+DEFAULT_MUNICIPIOS = ["CURITIBA", "FOZ DO IGUACU", "LONDRINA"]
+
+# ------------------------------
 # Função para carregar dados
 # ------------------------------
 @st.cache_data
 def carregar_dados(path):
-    df = pd.read_csv(path)
-    return df
+    try:
+        df = pd.read_csv(path)
+        df.dropna(subset=["Municipio"], inplace=True)
+        return df
+    except FileNotFoundError:
+        st.error(f"Arquivo de dados não encontrado: {path}")
+        return pd.DataFrame()
 
 # ------------------------------
 # Carregar planilhas
 # ------------------------------
-dados = {
-    "Maconha": carregar_dados("MaconhaV2.csv"),
-    "Cocaína": carregar_dados("CocainaV2.csv"),
-    "Crack": carregar_dados("CrackV2.csv"),
-}
+dados = {droga: carregar_dados(arquivo) for droga, arquivo in DATA_FILES.items()}
 
 # ------------------------------
 # Sidebar - seleção de droga, município e mês
@@ -35,87 +46,92 @@ st.sidebar.header("Filtros")
 droga = st.sidebar.selectbox("Selecione a droga", list(dados.keys()))
 df = dados[droga]
 
-# filtro municípios
-municipios = st.sidebar.multiselect(
-    "Selecione municípios",
-    options=df["Municipio"].unique(),
-    default=["CURITIBA", "FOZ DO IGUACU", "LONDRINA"]
-)
+if df.empty:
+    st.warning(f"Não foi possível carregar os dados para a droga '{droga}'. Verifique o arquivo de dados.")
+    st.stop()
 
-# filtro meses (identifica todas as colunas mensais)
+# filtro municípios
+municipios_options = sorted(df["Municipio"].unique())
+st.sidebar.subheader("Municípios")
+select_all_mun = st.sidebar.checkbox("Selecionar todos os municípios")
+if select_all_mun:
+    municipios = st.sidebar.multiselect("Selecione municípios", options=municipios_options, default=municipios_options)
+else:
+    municipios = st.sidebar.multiselect("Selecione municípios", options=municipios_options, default=DEFAULT_MUNICIPIOS)
+
+# filtro meses
 colunas_mensais = [c for c in df.columns if c not in ("Municipio", "Total")]
-meses_selecionados = st.sidebar.multiselect(
-    "Selecione meses",
-    options=colunas_mensais,
-    default=colunas_mensais  # todos marcados por padrão
-)
+st.sidebar.subheader("Meses")
+select_all_meses = st.sidebar.checkbox("Selecionar todos os meses", value=True)
+if select_all_meses:
+    meses_selecionados = st.sidebar.multiselect("Selecione meses", options=colunas_mensais, default=colunas_mensais)
+else:
+    meses_selecionados = st.sidebar.multiselect("Selecione meses", options=colunas_mensais, default=[])
 
 # aplica filtros
 df_filtrado = df[df["Municipio"].isin(municipios)].copy()
+df_filtrado["TotalSelecionado"] = df_filtrado[meses_selecionados].sum(axis=1) if meses_selecionados else 0
 
-# tabela mostra apenas meses selecionados + Municipio + Total
+# tabela
 colunas_tabela = ["Municipio"] + meses_selecionados + (["Total"] if "Total" in df.columns else [])
 df_tabela = df_filtrado[colunas_tabela]
 
 # ------------------------------
-# VISUALIZAÇÃO TABELA
+# VISUALIZAÇÃO TABELA (com separador de milhar)
 # ------------------------------
 st.subheader(f"📋 Tabela filtrada - {droga}")
-st.dataframe(df_tabela, use_container_width=True)
+df_tabela_formatado = df_tabela.copy()
+for col in df_tabela_formatado.columns:
+    if pd.api.types.is_numeric_dtype(df_tabela_formatado[col]):
+        df_tabela_formatado[col] = df_tabela_formatado[col].map(lambda x: f"{int(x):,}".replace(",", "."))
+st.dataframe(df_tabela_formatado, use_container_width=True)
 
 # ------------------------------
-# RANKING (continua usando Total anual)
+# RANKING
 # ------------------------------
 st.subheader(f"🏆 Maiores apreensões de {droga} (Total anual)")
 ranking = df.sort_values("Total", ascending=False).head(10)
-fig_rank = px.bar(ranking, x="Municipio", y="Total", title=f"Top 10 Municípios - {droga} (Total Anual)")
+fig_rank = px.bar(ranking, x="Municipio", y="Total", title=f"Top 10 Municípios - {droga} (Total Anual)", text="Total")
+fig_rank.update_traces(texttemplate='%{text:,.0f}'.replace(",", "."), textposition="outside")
 st.plotly_chart(fig_rank, use_container_width=True)
 
 # ------------------------------
-# EVOLUÇÃO MENSAL (apenas meses selecionados)
+# EVOLUÇÃO MENSAL
 # ------------------------------
 st.subheader(f"📈 Evolução mensal por município - {droga}")
-df_melt = df_filtrado.melt(
-    id_vars=["Municipio"],
-    value_vars=meses_selecionados,
-    var_name="Mes",
-    value_name="Kg"
-)
-fig_line = px.line(
-    df_melt, x="Mes", y="Kg", color="Municipio",
-    markers=True, title=f"Evolução das apreensões mensais - {droga}"
-)
+df_melt = df_filtrado.melt(id_vars=["Municipio"], value_vars=meses_selecionados, var_name="Mes", value_name="Kg")
+fig_line = px.line(df_melt, x="Mes", y="Kg", color="Municipio", markers=True, title=f"Evolução das apreensões mensais - {droga}", text="Kg")
+fig_line.update_traces(texttemplate='%{text:,.0f}'.replace(",", "."), textposition="top center")
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ------------------------------
-# SOMA ESTADUAL (apenas meses selecionados)
+# TOTAL ESTADUAL POR MÊS
 # ------------------------------
 st.subheader(f"📊 Total estadual por mês - {droga}")
 df_total_mes = df[meses_selecionados].sum()
 fig_state = px.bar(
-    x=df_total_mes.index, y=df_total_mes.values,
-    labels={"x": "Mês", "y": "Total (kg)"},
-    title=f"Total estadual por mês - {droga}"
+    x=df_total_mes.index, 
+    y=df_total_mes.values, 
+    labels={"x": "Mês", "y": "Total (kg)"}, 
+    title=f"Total estadual por mês - {droga}", 
+    text=df_total_mes.values
 )
+fig_state.update_traces(texttemplate='%{text:,.0f}'.replace(",", "."), textposition="outside")
 st.plotly_chart(fig_state, use_container_width=True)
 
 # ------------------------------
-# PARTICIPAÇÃO POR MUNICÍPIO (pizza - meses selecionados)
+# PARTICIPAÇÃO POR MUNICÍPIO
 # ------------------------------
 st.subheader(f"🍕 Participação por município - {droga} (meses selecionados)")
-df_pizza = df_filtrado.copy()
-df_pizza["TotalSelecionado"] = df_pizza[meses_selecionados].sum(axis=1)
-
-# (opcional) remove municípios zerados para evitar fatias nulas
-df_pizza = df_pizza[df_pizza["TotalSelecionado"] > 0]
-
+df_pizza = df_filtrado[df_filtrado["TotalSelecionado"] > 0]
 fig_pizza = px.pie(
-    df_pizza,
-    names="Municipio",
-    values="TotalSelecionado",
-    title=f"Distribuição das apreensões por município - {droga}",
-    hole=0.3  # donut; troque para 0 se quiser pizza tradicional
+    df_pizza, 
+    names="Municipio", 
+    values="TotalSelecionado", 
+    title=f"Distribuição das apreensões por município - {droga}", 
+    hole=0.3
 )
+fig_pizza.update_traces(textinfo="label+percent+value", texttemplate='%{value:,.0f}'.replace(",", "."))
 st.plotly_chart(fig_pizza, use_container_width=True)
 
 # ------------------------------
@@ -124,8 +140,6 @@ st.plotly_chart(fig_pizza, use_container_width=True)
 st.subheader("💾 Exportar dados")
 csv = df_tabela.to_csv(index=False).encode("utf-8")
 st.download_button(f"Baixar CSV filtrado ({droga})", csv, f"apreensao_{droga.lower()}_filtrada.csv", "text/csv")
-
-# ------------------------------
 # 🗺️ MAPA: Apreensões por município (meses selecionados) + contorno do PR
 # ------------------------------
 
